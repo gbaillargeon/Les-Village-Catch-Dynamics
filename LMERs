@@ -1,0 +1,258 @@
+#Linear Mixed Effects Models
+#For added location and gear data for 2022-2023 only
+#Individual fisher based LMER for complete time series
+#Data: All_Mo_TC_Dec and dfFisherSum and LMER_data
+
+selected_data_std <- as.data.frame(scale(filtered_data[, c("Total_SpCatch_Mo", "Fishing_Trips_Mo", "CPUE")]))
+selected_data_std$Gear <- LMER_data$Gear
+selected_data_std$Location <- filtered_data$Location
+selected_data_std$Month <- filtered_data$Month
+selected_data_std$year <- filtered_data$Year
+selected_data_std
+library(lme4)
+library(MuMIn)
+
+#LMER
+options(na.action = "na.fail")  # Required for dredge
+model_full <- lmer(Total_SpCatch_Mo ~ year*Gear + Location*year + Gear*Location + (1|Month), data=selected_data_std)
+model_set <- dredge(model_full)
+model_set 
+#final model for catch
+CatchLMER <- lmer(Total_SpCatch_Mo ~
+                    Gear +
+                    Location +
+                    year +
+                    Gear:Location +
+                    Location:year +
+                    (1 | Month), data = selected_data_std)
+summary(CatchLMER)
+Anova(CatchLMER, type = "III")
+
+#LMER CPUE
+options(na.action = "na.fail")  # Required for dredge
+model_full_cpue <- lmer(CPUE ~ year*Gear + Location*year + Gear*Location + (1|Month), data=selected_data_std)
+model_set_cpue <- dredge(model_full_cpue)
+model_set_cpue
+#final model CPUE
+best_model_cpue <- lmer(CPUE ~ Gear*Location + year + Location + (1|Month), data= selected_data_std)
+summary(best_model_cpue)
+Anova(best_model_cpue, type = "III")
+
+#LMER EFFORT 
+options(na.action = "na.fail")  # Required for dredge
+model_full_e <- lmer(Fishing_Trips_Mo ~ year*Gear + Location*year + Gear*Location + (1|Month), data=selected_data_std)
+model_set_e <- dredge(model_full_e)
+model_set_e
+#final model effort
+best_model_e <- lmer(Fishing_Trips_Mo ~ year*Location + Gear + Location + (1|Month), data= selected_data_std)
+summary(best_model_e)
+Anova(best_model_e, type="III")
+
+#Individual Fisher LMER
+df_clean <- df_fisherSum |>
+  dplyr::select(Total_Catch, Days_Fished, Total_Income, Year, Fisher, Month) |>
+  na.omit()
+#using dredge to find best fitting model for catch and income  
+library(MuMIn)
+options(na.action = "na.fail")  # Required for dredge
+model_fisherInc<- lmer(scale(Total_Catch) ~ scale(Days_Fished)*scale(Total_Income) + Year*Month+ 
+                         (1 | Fisher), data = df_fisherSum)
+search_Inc <- dredge(model_fisherInc)  
+search_Inc
+df_clean
+#final catch model
+Catch_mod <- lmer(scale(Total_Catch) ~
+                    scale(Days_Fished) * scale(Total_Income) +
+                    Year +
+                    (1 | Fisher), data=df_clean)
+summary(Catch_mod)
+Anova(Catch_mod, type="III")
+r.squaredGLMM(Catch_mod)
+
+##Income LMER
+options(na.action = "na.fail")  # Required for dredge
+model_fisherIncx<- lmer(scale(Total_Income) ~ scale(Days_Fished)*scale(Total_Catch) + Year*Month+ 
+                          (1 | Fisher), data = df_clean)
+search_Incx <- dredge(model_fisherIncx)  
+search_Incx
+#final best fit model for income
+Final_FisherInc <- lmer(scale(Total_Income) ~
+                          scale(Total_Catch) + Year + (1 | Fisher), data=df_clean)
+summary(Final_FisherInc) 
+Anova(Final_FisherInc, Type="III") 
+r.squaredGLMM(Final_FisherInc)
+
+#now for cpue (fish per fisher per month)
+df_clean <- df_clean %>% 
+  mutate(
+    Fisher_CPUE = Total_Catch/Days_Fished)
+df_clean
+
+options(na.action = "na.fail")  # Required for dredge
+model_fisherCPUE<- lmer(scale(Fisher_CPUE) ~ scale(Days_Fished)*scale(Total_Catch)*scale(Total_Income) + Year*Month+ 
+                          (1 | Fisher), data = df_clean)
+search_CPUE <- dredge(model_fisherCPUE)  
+search_CPUE
+str(df_clean)
+#a lot of explanatory power is absorbed by catch and effort which directly contribute to cpue calc
+#final model is 
+Final_FisherCPUE <- lmer(scale(Fisher_CPUE) ~
+                           scale(Days_Fished) +
+                           scale(Total_Catch) +
+                           scale(Total_Income) +
+                           scale(Days_Fished):scale(Total_Catch) +
+                           scale(Days_Fished):scale(Total_Income) +
+                           scale(Total_Catch):scale(Total_Income) +
+                           Year +
+                           (1 | Fisher), data=df_clean)
+summary(Final_FisherCPUE)
+Anova(Final_FisherCPUE, type="III")
+Fgamr.squaredGLMM(Final_FisherCPUE)
+#shows that fisher behavior is reflective of anticipated income and catch not purely number of days they are fishing 
+
+df_effortFisher <- df_effortFisher %>% 
+  mutate(
+    CPUE_fisher = Total_Catch/Days_Fished)
+
+#plot days fished per fisher per mo  vs monthly total effort to see corr there !
+#no of fishing days per fisher equate tot overal eff goal 
+col_eff <- ggplot(df_effortFisher, aes(x = Mean_EffPerFisher, y = All_Effort, color = Year)) +
+  geom_point(size = 3, alpha = 0.7) +
+  labs(
+    x = "Average Days fished per fisher",
+    y = "Fisher Cooperative Monthly Effort (Fishing Trips)",
+    color = "Year"
+  ) + 
+  geom_smooth(method = "lm", formula = y ~ Year,  color ="darkgray", fill = "gray", alpha =0.9) +   # One smooth line
+  theme_classic()+
+  theme(axis.line = element_line(),
+        axis.title.x = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.text = element_text(size=15))
+col_eff
+
+col_eff <- ggplot(df_effortFisher, aes(x = No_Fishers, y = All_Effort, color = Year)) +
+  geom_point(size = 3, alpha = 0.7) +
+ labs(
+    x = "Number of Fishers",
+    y = "Fisher Cooperative Monthly Effort (Fishing Trips)",
+    color = "Year"
+  ) + theme_classic() +
+  theme(axis.line = element_line(),
+        axis.title.x = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.text = element_text(size=15))
+col_eff
+#add in some ggpredict model lines here
+library(ggeffects)
+Catch_mod <- lmer(scale(Total_Catch) ~
+                    scale(Days_Fished) * scale(Total_Income) +
+                    Year +
+                    (1 | Fisher), data=df_clean)
+
+pred_scaled <- ggpredict(
+  Catch_mod,
+  terms = "Days_Fished [minmax]",
+  marginaleffects = TRUE
+)
+pred_scaled
+catch_mean <- mean(df_clean$Total_Catch, na.rm = TRUE)
+catch_sd   <- sd(df_clean$Total_Catch, na.rm = TRUE)
+
+pred_unscaled <- pred_scaled %>%
+  dplyr::mutate(
+    predicted  = predicted  * catch_sd + catch_mean,
+    conf.low   = conf.low   * catch_sd + catch_mean,
+    conf.high  = conf.high  * catch_sd + catch_mean
+  )
+  C
+catch_days <- ggplot(df_effortFisher, aes(x = Days_Fished, y = Total_Catch, color = Year == 2022)) +
+  geom_point(size = 3, alpha = 0.3) +
+  scale_y_continuous(labels = label_number(big.mark = ","))+
+  geom_ribbon(data = pred_unscaled,
+              aes(x = x, ymin = conf.low, ymax = conf.high),
+              inherit.aes = FALSE,
+              fill = "steelblue", alpha = 0.4) +
+  geom_line(data = pred_unscaled,
+            aes(x = x, y = predicted),
+            inherit.aes = FALSE,
+            color = "black", linewidth = 1.2) +
+  scale_color_manual(
+    values = c(`FALSE` = "grey70", `TRUE` = "green"),
+    labels = c("Other years", "2022"),
+    name = "Year"
+  )+
+  labs(
+    x = "Days fished per fisher in a month",
+    y = "Monthly Catch per Fisher",
+    color = "Year"
+  )+ theme_classic() +
+  theme(axis.line = element_line(),
+        axis.title.x = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.text = element_text(size=15))
+
+catch_days
+
+cpue_effALL <- ggplot(df_effortFisher, aes(x = All_Effort, y = Total_Catch, color = Year)) +
+  geom_point(size = 3, alpha = 0.7) +
+  #  scale_y_continuous(labels = label_number(big.mark = ","))+
+  # geom_smooth(method = "gam", formula = y ~x,  
+  #             method.args = list(family = Gamma(link = "log")), color ="darkgray", fill = "gray", alpha =0.9) +   # One smooth line
+  labs(
+    x = "Individual Fishing Trips per Month",
+    y = "Monthly Catch per Fisher per Trip",
+    color = "Year")+ theme_classic()
+cpue_effALL
+
+#CPUE 
+df_clean
+pred_scaled <- ggpredict(
+  Final_FisherCPUE,
+  terms = "Days_Fished [minmax]",
+  Final_FisherCPUE = TRUE
+)
+pred_scaled
+cpue_mean <- mean(df_clean$Fisher_CPUE, na.rm = TRUE)
+cpue_sd   <- sd(df_clean$Fisher_CPUE, na.rm = TRUE)
+
+pred_unscaled <- pred_scaled %>%
+  dplyr::mutate(
+    predicted  = predicted  * cpue_sd + cpue_mean,
+    conf.low   = conf.low   * cpue_sd + cpue_mean,
+    conf.high  = conf.high  * cpue_sd + cpue_mean
+  )
+pred_unscaled_line <- pred_unscaled %>%
+  dplyr::mutate(predicted = pmax(predicted, 0))
+
+pred_unscaled2 <- pred_unscaled %>%
+  dplyr::mutate(
+    conf.low = pmax(conf.low, 0),
+    conf.high = pmax(conf.high, 0)
+  )
+
+cpue_days <- ggplot(df_clean, aes(x = Days_Fished, y = Fisher_CPUE, color = Year ==2022)) +
+  geom_point(size = 3, alpha = 0.3) +
+  geom_ribbon(data = pred_unscaled2,
+              aes(x = x, ymin = conf.low, ymax = conf.high),
+              inherit.aes = FALSE,
+              fill = "grey70", alpha = 0.4) +
+  geom_line(data = pred_unscaled_line,
+            aes(x = x, y = predicted),
+            inherit.aes = FALSE,
+            color = "black", linewidth = 1.2) +
+  scale_color_manual(
+    values = c(`FALSE` = "grey70", `TRUE` = "green"),
+    labels = c("Other years", "2022"),
+    name = "Year"
+  )+
+  labs(
+    x = "Days fished per fisher in a month",
+    y = "Monthly Catch per Fisher per Day",
+    color = "Year"
+  )+ theme_classic() + 
+  theme(axis.line = element_line(),
+        axis.title.x = element_text(size = 15),
+        axis.title.y = element_text(size = 15),
+        axis.text = element_text(size=15))
+cpue_days
