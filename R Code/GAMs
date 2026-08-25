@@ -1,4 +1,4 @@
-#Code for Generalized Additive Models
+#Code for Generalized Additive Models: Catch, CPUE, and Income
 #Data: All_Mo_TC_Dec
 library(ggeffects)
 library(gratia)
