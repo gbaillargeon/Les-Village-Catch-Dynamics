@@ -1,0 +1,358 @@
+#ICES Rule 5 - annual limits
+#calculations for Rb Rule
+Ay<-113552
+r_num<-mean(c(210,87))
+r_denom<-mean(c(98,79,84))
+m<-0.5
+b<-87 / (1.4 * 79)
+
+
+A24<- Ay*(r_num/r_denom)*m*b
+
+#76,231.79
+
+#30% reduction of 2023 stock
+red30_annual<-79487
+red30_month <- red30_annual/12
+#6623.917
+
+#Forward Projections using GAMs to Evaluate Management Impacts
+#Need to use simplified GAM for forecasting as there are too many interactive variables to hold at mean
+
+#predicting future holding 2023 patterns  
+monthly_means_2023 <- ALL_Mo_TC_Dec %>%
+  filter(Year == 2023) %>%
+  group_by(Month_Number) %>%
+  summarise(
+    Effort     = mean(Effort, na.rm = TRUE),
+    CPUE_final = mean(CPUE_final, na.rm = TRUE),
+    Income     = mean(Income, na.rm = TRUE),
+    .groups = "drop"
+  )
+last_year23 <- max(ALL_Mo_TC_Dec$year, na.rm = TRUE)
+
+future_newdata_2023trend <- expand_grid(
+  year = (last_year23 + 1):(last_year23 + 5),
+  Month_Number = 1:11
+) %>%
+  left_join(monthly_means_2023, by = "Month_Number")
+
+#using simplifed GAM as there are too many interactive effects to capture model nicely
+m_catch_forecast <- gam(
+  Catch ~
+    s(Month_Number, bs="cc", k=11) +
+    s(year, k=8) +
+    s(Effort, k=8) +
+    s(CPUE_final, k=8) +
+    ti(Effort, Month_Number) +
+    ti(CPUE_final, Month_Number),
+  family = Gamma(link="log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+#instead of full model: Catch ~ s(Effort) + s(CPUE_final) + te(year, Month_Number) + 
+#te(year, Effort) + te(year, Income) + te(year, CPUE_final)
+
+pred_link23 <- predict(m_catch_forecast, newdata = future_newdata_2023trend, type = "link", se.fit = TRUE)
+
+future_pred23 <- future_newdata_2023trend %>%
+  mutate(
+    fit_link = pred_link23$fit,
+    se_link  = pred_link23$se.fit,
+    Catch_fit = exp(fit_link),
+    Catch_low = exp(fit_link - 1.96 * se_link),
+    Catch_high= exp(fit_link + 1.96 * se_link)
+  )
+model_last2
+#predicting future trends based on historical averages
+#Keeping 2023 seasonal trends only (not annual trends)
+monthly_means <- ALL_Mo_TC_Dec %>%
+  group_by(Month_Number) %>%
+  summarise(
+    Effort     = mean(Effort, na.rm = TRUE),
+    CPUE_final = mean(CPUE_final, na.rm = TRUE),
+    Income     = mean(Income, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#now attach the month values to years 
+last_year <- max(ALL_Mo_TC_Dec$year, na.rm = TRUE)
+future_grid <- expand_grid(
+  year = (last_year + 1):(last_year + 5),
+  Month_Number = 1:11
+)
+
+future_newdata <- future_grid %>%
+  left_join(monthly_means, by = "Month_Number")
+future_newdata
+
+#predict using catch gam 
+pred_link <- predict(m_catch_forecast, newdata = future_newdata, type = "link", se.fit = TRUE)
+
+future_predAVG <- future_newdata %>%
+  mutate(
+    fit_link = pred_link$fit,
+    se_link  = pred_link$se.fit,
+    Catch_fit = exp(fit_link),
+    Catch_low = exp(fit_link - 1.96 * se_link),
+    Catch_high= exp(fit_link + 1.96 * se_link)
+  )
+
+#plot
+ALL_Mo_TC_plot <- ALL_Mo_TC_Dec %>%
+  mutate(date = as.Date(sprintf("%d-%02d-01", year, Month_Number)))
+
+future_pred23 <- future_pred23 %>%
+  mutate(date = as.Date(sprintf("%d-%02d-01", year, Month_Number)))
+
+future_predAVG <- future_predAVG %>%
+  mutate(date = as.Date(sprintf("%d-%02d-01", year, Month_Number)))
+
+#Prediction of limiting fishing to 100 trips per month
+future_newdata_cap <- future_grid %>%
+  left_join(monthly_means, by = "Month_Number") %>%
+  mutate(
+    Effort = pmin(Effort, 100)   # <-- effort cap
+  )
+
+#now use predict function based on newdata cap
+pred_link_cap <- predict(
+  m_catch_forecast,
+  newdata = future_newdata_cap,
+  type = "link",
+  se.fit = TRUE
+)
+
+future_pred_cap <- future_newdata_cap %>%
+  mutate(
+    fit_link   = pred_link_cap$fit,
+    se_link    = pred_link_cap$se.fit,
+    Catch_fit  = exp(fit_link),
+    Catch_low  = exp(fit_link - 1.96 * se_link),
+    Catch_high = exp(fit_link + 1.96 * se_link),
+    date       = as.Date(sprintf("%d-%02d-01", year, Month_Number))
+  )
+future_pred_cap
+#now simulate a 30% reduction in catch in 2024 based on 2023 data
+#will use historical means in terms of modeling still to retain year-month seasonal trends from hist avgs
+baseline_2023 <- 113552
+target_prop   <- 0.70
+target_annual <- baseline_2023 * target_prop  
+target_annual
+first_mgmt_year <- min(future_predAVG$year)
+
+future_step <- future_predAVG %>%
+  mutate(Scenario = "30% of 2023 annual (each year)") %>%
+  group_by(year) %>%                           # <-- group by YEAR only
+  mutate(
+    year_total = sum(Catch_fit, na.rm = TRUE), # annual total from monthly predictions
+    scale_fac  = ifelse(year < first_mgmt_year, 1, target_annual / year_total),
+    
+    Catch_fit_ss  = Catch_fit  * scale_fac,
+    Catch_low_ss  = Catch_low  * scale_fac,
+    Catch_high_ss = Catch_high * scale_fac
+  ) %>%
+  ungroup()
+future_step
+
+#plotting all management scenarios together
+
+Catch_predict <- ggplot() +
+  geom_line(data = ALL_Mo_TC_plot, aes(date, Catch), linewidth = 1, alpha = 0.65) +
+  geom_line(data = future_pred_cap, aes(date, Catch_fit), color = "black", linewidth = 1.2, alpha=.1) +
+  geom_line(data = future_predAVG, aes(date, Catch_fit), color = "black", linewidth = 1.2, alpha=0.1) +
+  geom_line(data = future_pred23, aes(date, Catch_fit), color = "black", linewidth = 1.2, alpha=0.1) +
+  geom_line(data = future_step, aes(date, Catch_fit_ss), color = "black", linewidth = 1.2, alpha=0.1) +
+  geom_smooth(
+    data = ALL_Mo_TC_plot,
+    aes(x = date, y = Catch),
+    method = "gam",
+    formula = y ~ s(x, k = 9),
+    se = TRUE,
+    linetype = "solid",
+    color = "steelblue",
+    linewidth = 1.2
+  )+
+  geom_smooth(
+    data = future_pred23,
+    aes(date, Catch_fit, color="Based on 2023 Trends"),
+    method = "gam",
+    formula = y ~ s(x, k = 30),
+    se = TRUE,
+    linewidth = 1.2,
+  ) +
+  geom_smooth(
+    data = future_predAVG,
+    aes(date, Catch_fit, color="Historical Forecast"),
+    method = "gam",
+    formula = y ~ s(x, k = 30),
+    se = TRUE,
+    linewidth = 2
+  ) +
+  geom_smooth(
+    data = future_pred_cap,
+    aes(x=date, y=Catch_fit, color="Monthly Effort Limit (100 trips)"),
+    method = "gam",
+    formula = y ~ s(x, k = 30),
+    se = TRUE,
+    linewidth = 1.5
+  )+
+  geom_smooth(
+    data = future_step,
+    aes(x=date, y=Catch_fit_ss, color="30% Catch Reduction"),
+    method = "gam",
+    formula = y ~ s(x, k = 30),
+    se = TRUE,
+    linetype="dashed",
+    linewidth = 1
+  )+
+  geom_text(
+    data = data.frame(
+      date = as.Date(c("2018-12-01")),
+      Catch = c(3000),
+      label = c("Observed GAM")
+    ),
+    aes(x = date, y = Catch, label = label),
+    hjust = 0.15,
+    size = 4,
+    color = c("steelblue")
+  )+
+  scale_color_manual(
+    name = "Forecasts",
+    values = c(
+      "Historical Forecast"  = "orange",
+      "Based on 2023 Trends" = "red",
+      "Monthly Effort Limit (100 trips)"  = "darkgreen",
+      "30% Catch Reduction"  = "black"
+    )
+  )+
+  theme(
+    axis.text  = element_text(size = 18),
+    axis.title = element_text(size = 16)
+  )+
+  scale_x_date(
+    date_breaks = "2 years",
+    date_labels = "%Y"
+  )+ 
+  theme(
+    legend.text     = element_text(size = 12),
+    legend.title    = element_text(size = 13),
+    legend.key.size = unit(0.6, "cm"),
+    plot.title = element_text(
+      hjust=0.5,
+      margin=margin(b=5)
+    ))+
+  labs(x = "Year", y = "Monthly Total Catch",
+       title = "Observed Catch and Income for next 5 years based on monthly covariates") +  
+  theme_classic(base_size = 16)
+Catch_predict
+
+###Predicting 2024###
+#predicting catch in 2024 based on effort cap of 100 trips per mo
+max_days <- 100
+
+newdata_grid <- expand.grid(
+  year = 2024,
+  Month_Number = 1:11,
+  Effort = 100,
+  CPUE_final = mean(ALL_Mo_TC_Dec$CPUE_final, na.rm = TRUE),
+  Income = mean(ALL_Mo_TC_Dec$Income, na.rm = TRUE)
+)
+
+pred <- predict(model_last2, newdata = newdata_grid, type = "response", se.fit = TRUE)
+newdata_grid$pred_catch <- pred$fit
+newdata_grid$lower <- pred$fit * exp(-1.96 * pred$se.fit)
+newdata_grid$upper <- pred$fit * exp( 1.96 * pred$se.fit)
+estimated_24catch_100 <- data.frame(
+  Catch = mean(newdata_grid$pred_catch),
+  Lower = mean(newdata_grid$lower),
+  Upper = mean(newdata_grid$upper)
+)
+estimated_24catch_100
+#  11088.13
+
+
+#predicting catch in 2024 with no management change 
+newdata_grid <- expand.grid(
+  year = 2024,
+  Month_Number = 1:11,
+  Effort = mean(ALL_Mo_TC_Dec$Effort, na.rm = TRUE),
+  CPUE_final = mean(ALL_Mo_TC_Dec$CPUE_final, na.rm = TRUE),
+  Income = mean(ALL_Mo_TC_Dec$Income, na.rm = TRUE)
+)
+
+pred <- predict(model_last2, newdata = newdata_grid, type = "response", se.fit = TRUE)
+newdata_grid$pred_catch <- pred$fit
+newdata_grid$lower <- pred$fit * exp(-1.96 * pred$se.fit)
+newdata_grid$upper <- pred$fit * exp( 1.96 * pred$se.fit)
+estimated_24catch <- data.frame(
+  Catch = mean(newdata_grid$pred_catch),
+  Lower = mean(newdata_grid$lower),
+  Upper = mean(newdata_grid$upper)
+)
+estimated_24catch
+# 13735.99
+#monthly increase in fish caught 2024 is 13735.99-9474 (2023 avg) = 4261
+
+#What is income when catch is set as 2024 with 100 days max effort
+#correction 
+newdata_100 <- data.frame(
+  Effort = mean(ALL_Mo_TC_Dec$Effort, na.rm=TRUE),
+  year = 2023,  # choose the year explicitly
+  Month_Number = 1:11,
+  Catch = 11088,
+  CPUE_final = mean(ALL_Mo_TC_Dec$CPUE_final, na.rm = TRUE)
+)
+newdata_100C <- expand.grid(
+  year = 2024,
+  Month_Number = 1:11,
+  Effort = 100,
+  CPUE_final = mean(ALL_Mo_TC_Dec$CPUE_final, na.rm = TRUE),
+  Catch=11088
+)
+pred_100 <- predict(
+  I18,
+  newdata = newdata_100C,
+  type = "response",
+  se.fit = TRUE
+)
+
+newdata_100C$pred_inc <- pred_100$fit
+newdata_100C$lower <- pred_100$fit * exp(-1.96 * pred_100$se.fit)
+newdata_100C$upper <- pred_100$fit * exp( 1.96 * pred_100$se.fit)
+estimated_I_100 <- data.frame(
+  Income = mean(newdata_100$pred_inc),
+  Incomesd = sd(newdata_100$pred_inc),
+  Lower = mean(newdata_100$lower),
+  Upper = mean(newdata_100$upper)
+)
+
+
+#when catch is 2023 average levels (10322.91 = catch avg per mo) what is income predicted to be 
+
+newdata_100 <- data.frame(
+  Effort = mean(ALL_Mo_TC_Dec$Effort, na.rm=TRUE),
+  year = 2023,  # choose the year explicitly
+  Month_Number = 1:11,
+  Catch = 10322,
+  CPUE_final = mean(ALL_Mo_TC_Dec$CPUE_final, na.rm = TRUE)
+)
+pred_100 <- predict(
+  add_mod_GCVbs_IT,
+  newdata = newdata_100,
+  type = "response",
+  se.fit = TRUE
+)
+
+newdata_100$pred_inc <- pred_100$fit
+newdata_100$lower <- pred_100$fit * exp(-1.96 * pred_100$se.fit)
+newdata_100$upper <- pred_100$fit * exp( 1.96 * pred_100$se.fit)
+estimated_catch_100 <- data.frame(
+  Income = mean(newdata_100$pred_inc),
+  IncomeSD = sd(newdata_100$pred_inc),
+  Lower = mean(newdata_100$lower),
+  Upper = mean(newdata_100$upper)
+)
+
+estimated_catch_100
