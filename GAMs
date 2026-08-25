@@ -1,0 +1,518 @@
+#Code for Generalized Additive Models
+#Data: All_Mo_TC_Dec
+library(ggeffects)
+library(gratia)
+library(mgcv)
+set.seed(23)
+
+#month mapping
+month_mapping <- c("January"=1, "February"=2, "March"=3, "April"=4, "May"=5, "June"=6,
+                   "July"=7, "August"=8, "September"=9, "October"=10, "November"=11, "December"=12)
+ALL_Mo_TC_Dec$Month_Number <- month_mapping[ALL_Mo_TC_Dec$Month]
+ALL_Mo_TC_Dec$Month_Number <- as.numeric(ALL_Mo_TC_Dec$Month_Number)
+ALL_Mo_TC_Dec$year <- as.numeric(ALL_Mo_TC_Dec$Year)
+
+#checking data strucutre
+mean_catch <- mean(ALL_Mo_TC_Dec$Catch)
+var_catch <- var(ALL_Mo_TC_Dec$Catch)
+mean_catch
+var_catch
+hist(ALL_Mo_TC_Dec$Catch)
+
+#Single Variable GAM
+C2 <- gam(Catch ~  s(Month_Number), family=Gamma(link="log"),method="REML",
+          data = ALL_Mo_TC_Dec)
+C3 <- gam(Catch ~  s(Year, k=9), family=Gamma(link="log"), 
+        data = ALL_Mo_TC_Dec)
+C4 <- gam(Catch ~  s(Effort), family=Gamma(link="log"), method="REML",
+           data = ALL_Mo_TC_Dec)
+C5 <- gam(Catch ~  s(Income), family=Gamma(link="log"),
+              data = ALL_Mo_TC_Dec)
+C6 <- gam(Catch ~  s(CPUE_final), family=Gamma(link="log"),
+            data = ALL_Mo_TC_Dec)
+
+#use these tools to check each model 
+summary()
+gratia::draw()
+AIC(eff,mo,yr,income, cpue) 
+#futher model checks for lowest AIC model
+logLik.gam(cpue)
+gam.check()
+concurvity()
+anova()
+
+##global additive model with select=TRUE shrinkage and REML vs GCV
+add_mod <- gam(Catch ~  s(Month_Number) + s(Year, k=9) + s(Effort)
+               + s(Income) + s(CPUE_final), family=Gamma(link="log"), method="REML",
+               data = ALL_Mo_TC, select=TRUE)
+
+add_mod_F <- gam(Catch ~  s(Month_Number) + s(Year, k=9) + s(Effort)
+                 + s(Income) + s(CPUE_final), family=Gamma(link="log"), method="REML",
+                 data = ALL_Mo_TC, select=FALSE)
+
+add_mod_F_GCV <- gam(Catch ~  s(Month_Number) + s(Year, k=9) + s(Effort)
+                     + s(Income) + s(CPUE_final), family=Gamma(link="log"),
+                     data = ALL_Mo_TC, select=FALSE)
+
+C7 <- gam(Catch ~  s(Month_Number) + s(Year, k=9) + s(Effort)
+                   + s(Income) + s(CPUE_final), family=Gamma(link="log"), 
+                   data = ALL_Mo_TC, select=TRUE) #best model fit so far, but issues with effort gam check
+
+#changing basis function for global additive model
+add_mod_bs <- gam(Catch ~  s(Month_Number) + s(year, k=9, bs="cc") + s(Effort)
+                  + s(Income) + s(CPUE_final), family=Gamma(link="log"), method="REML",
+                  data = ALL_Mo_TC, select=TRUE) 
+
+add_mod_bs_mo <- gam(Catch ~  s(Month_Number, bs="cc") + s(year, k=9) + s(Effort)
+                     + s(Income) + s(CPUE_final), family=Gamma(link="log"),
+                     data = ALL_Mo_TC, select=TRUE) #same fit as add mod GCV 
+AIC(add_mod_bs_mo)
+logLik.gam(add_mod_bs_mo)
+add_mod_bs_moREML <- gam(Catch ~  s(Month_Number, bs="cc") + s(year, k=9) + s(Effort)
+                         + s(Income) + s(CPUE_final), family=Gamma(link="log"), method="REML",
+                         data = ALL_Mo_TC, select=TRUE) 
+
+add_mod_bs_mo_yr <- gam(Catch ~  s(Month_Number, bs="cc") + s(year, k=9, bs="cc") + s(Effort)
+                        + s(Income) + s(CPUE_final), family=Gamma(link="log"),
+                        data = ALL_Mo_TC, select=TRUE) #higher than just month version
+
+add_mod_Fbs <- gam(Catch ~  s(Month_Number) + s(year, k=9) + s(Effort)
+                   + s(Income)+ s(CPUE_final), family=Gamma(link="log"), method="REML",
+                   data = ALL_Mo_TC, select=FALSE)
+
+add_mod_GCVbs <- gam(Catch ~  s(Month_Number) + s(year, k=9, bs="cc") + s(Effort)
+                     + s(Income)+ s(CPUE_final), family=Gamma(link="log"), 
+                     data = ALL_Mo_TC, select=TRUE)
+
+AIC(add_mod_bs_mo, add_mod_GCV, add_mod_GCVbs, add_mod_bs_moREML)   
+gam.check(add_mod_GCVbs) 
+
+#now trying cc basis with identity instead of log link function 
+add_mod_GCVbsID <- gam(Catch ~  s(Month_Number, bs="cc") + s(year, k=9) + s(Effort)
+                       + s(Income)+ s(CPUE_final), family=Gamma(link="identity"), 
+                       data = ALL_Mo_TC, select=TRUE)
+AIC(add_mod_GCVbsID) #much higher - identity is not better function 
+
+#Outcome: GCV is better with log link, and cyclic spline on month instead of year (although no true AIC change)
+
+#Global additive model without month
+global_noMo <- gam(Catch ~  s(year, k=9) + s(Effort)
+                        + s(Income) + s(CPUE_final), family=Gamma(link="log"),
+                        data = ALL_Mo_TC, select=TRUE) 
+gam.check()
+#Need to increase effort k for better fit 
+C8 <- gam(Catch ~  s(year, k=9) + s(Effort, k=20)
+                      + s(Income) + s(CPUE_final), family=Gamma(link="log"),
+                      data = ALL_Mo_TC_Dec, select=TRUE) 
+
+#Best global additive model plus year x month tensor product
+C9 <- gam(Catch ~  s(year, k=9) + s(Effort) + s(CPUE_final)
+          + s(Income) + te(year, Month_Number),family=Gamma(link="log"), 
+          data = ALL_Mo_TC_Dec, select=TRUE)
+logLik.gam(C9)
+AIC(C9)
+#Global additive model without cpue
+C10<- gam(Catch ~  s(year, k=9) + s(Effort, k=20)
+                           + s(Income), family=Gamma(link="log"),
+                           data = ALL_Mo_TC_Dec, select=TRUE) 
+AIC(add_mod_GCV_eff,add_mod_GCV_eff_noCP)
+logLik.gam(add_mod_GCV_eff_noCP)
+
+#Global model with all interactions
+C11<- gam(Catch ~  s(year, k=9) + s(Effort) + s(CPUE_final)
+                           + s(Income) + te(year, Month_Number) +
+                             te(year, Effort) + te(year, Income) + te(year, CPUE_final),
+                           family=Gamma(link="log"), 
+                           data = ALL_Mo_TC_Dec, select=TRUE)
+summary(C11)
+gam.check(C11)
+AIC(C11)
+logLik.gam(C11)
+
+#Now removing year as well as edf was near 0
+C12<- gam(Catch ~  s(Effort) + s(CPUE_final)
+          + s(Income) + te(year, Month_Number) +
+            te(year, Effort) + te(year, Income) + te(year, CPUE_final),
+          family=Gamma(link="log"), 
+          data = ALL_Mo_TC_Dec, select=TRUE)
+
+#based on concurvity results of C11 model suggest removing year and income (keeping interactive effects)
+C13 <- gam(
+  Catch ~ s(Effort) +
+    te(year, Month_Number) +
+    te(year, Effort) +
+    te(year, Income) +
+    te(year, CPUE_final),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+#Trying tensor products only 
+C14<- gam(Catch ~ 
+    te(year, Month_Number) +
+    te(year, Effort) +
+    te(year, Income) +
+    te(year, CPUE_final),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+AIC(C14)
+logLik.gam(C14)
+concurvity(C14) #needs improvement
+
+#finding optimal mix of main and tensor product effects
+C15 <- gam(
+  Catch ~  te(year, Month_Number) + s(Effort) + s(CPUE_final) +
+    te(year, Effort) +te(year, Income),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+C16 <- gam(
+  Catch ~  te(year, Month_Number) + s(CPUE_final) +
+    te(year, Effort) +te(year, Income),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+C17 <- gam(
+  Catch ~  te(year, Month_Number) + s(Effort) +
+    te(year, Effort) +te(year, Income),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+C18 <- gam(
+  Catch ~  te(year, Month_Number) +
+    te(year, Effort) +te(year, Income),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+C18 <- gam(
+  Catch ~  te(year, Month_Number) +
+    te(year, Effort) +te(year, Income),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+C19 <- gam(
+  Catch ~  s(Income) + s(CPUE_final) +te(year, Month_Number) +
+    te(year, Effort),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+C20 <- gam(
+  Catch ~  s(Income) +te(year, Month_Number) +
+    te(year, Effort),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+C21 <- gam(
+  Catch ~  s(CPUE_final) +te(year, Month_Number) +
+    te(year, Effort),
+  family = Gamma(link = "log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+
+
+AIC(C21)
+logLik.gam(C21)
+
+##Best model - final chosen based on AIC, concurvity, log likelihood, and gam check##
+C1 <- gam(
+  Catch ~ s(Effort) + s(CPUE_final) +
+    te(year, Month_Number) + te(year, Effort) +
+    te(year, Income) + te(year, CPUE_final),
+  family = Gamma(link="log"),
+  data = ALL_Mo_TC_Dec,
+  select = TRUE
+)
+AIC()
+logLik.gam()
+concurvity(, full = FALSE)
+gam.check(C1)
+summary(C1)
+summary(C8)
+####Income GAM####
+#single variable models
+I1 <- gam(Income ~  s(Month_Number), family=Gamma(link="log"),
+           data = ALL_Mo_TC_Dec)
+I2 <- gam(Income ~  s(year, k=9), family=Gamma(link="log"),
+           data = ALL_Mo_TC_Dec)
+I3 <- gam(Income ~  s(Effort), family=Gamma(link="log"), 
+            data = ALL_Mo_TC_Dec)
+I4 <- gam(Income ~  s(Catch), family=Gamma(link="log"), 
+             data = ALL_Mo_TC_Dec)
+I5 <- gam(Income ~  s(CPUE_final), family=Gamma(link="log"),
+               data = ALL_Mo_TC_Dec)
+
+AIC(I1, I2, I3, I4, I5)
+AIC(I7)
+logLik.gam(I7)
+#global additive model with select=TRUE shrinkage and REML vs GCV
+I6 <- gam(Income ~  s(Month_Number) + s(year, k=9) + s(Effort)
+                   + s(CPUE_final)+ s(Catch), family=Gamma(link="log"), method = "GCV.Cp",
+                   data = ALL_Mo_TC_Dec, select=TRUE)
+
+I7 <- gam(Income ~  s(Month_Number) + year + s(Catch) +
+                          s(CPUE_final) + s(Effort ) +
+                          te(year, Month_Number) + te(year, Catch) + te(year, CPUE_final) + te(year, Effort) +
+                          te(Catch, Month_Number) + te(Catch, CPUE_final) + te(Catch, Effort) +
+                          te(CPUE_final, Month_Number),
+                        family=Gamma(link="log"), method = "GCV.Cp",
+                        data = ALL_Mo_TC_Dec, select=TRUE)
+
+#changing basis functions do not improve model fit
+I6_1 <- gam(Income ~  s(Month_Number, bs="cc") + s(year, k=9) + s(Effort)
+                   + s(CPUE_final)+s(Catch), family=Gamma(link="log"), method = "GCV.Cp",
+                   data = ALL_Mo_TC_Dec, select=TRUE)
+
+I6_2 <- gam(Income ~  s(Month_Number) + s(year, k=9, bs="cr") + s(Effort)
+                    + s(CPUE_final)+s(Catch), family=Gamma(link="log"), method = "GCV.Cp",
+                    data = ALL_Mo_TC_Dec, select=TRUE)
+
+#month number has been selected out - same as I6_2
+I8 <- gam(Income ~  s(year, k=9, bs="cr") + s(Effort)
+                    + s(CPUE_final)+s(Catch), family=Gamma(link="log"), method = "GCV.Cp",
+                    data = ALL_Mo_TC_Dec, select=TRUE)
+
+#adding interactive effects - no need to change basis function from results 
+I9 <- gam(Income ~  s(year, k=9, bs="cr") + s(Catch) +
+                          s(CPUE_final) + s(Effort ) +
+                          te(year, Month_Number) + te(year, Catch) + te(Month_Number, CPUE_final) 
+                          + te(year, Effort) 
+                          + te(Catch, CPUE_final),
+                        family=Gamma(link="log"), method = "GCV.Cp",
+                        data = ALL_Mo_TC_Dec, select=TRUE)
+
+#effort and yearxcatch goes to zero, catch is linear 
+
+#trying to reduce parameters for best fit
+
+#no yearxcatch, instead monthxcatch
+I10 <- gam(Income ~  s(year, k=9, bs="cr") +Catch +
+            s(CPUE_final) + s(Effort ) +
+            te(year, Month_Number) + te(Month_Number, Catch) + te(Month_Number, CPUE_final) 
+          + te(year, Effort) 
+          + te(Catch, CPUE_final),
+          family=Gamma(link="log"), method = "GCV.Cp",
+          data = ALL_Mo_TC_Dec, select=TRUE)
+AIC(I10)
+logLik.gam(I10)
+#no effort but month as single effect
+I11 <- gam(Income ~  s(year, k=9, bs="cr") +Catch +s(Month_Number) +
+             s(CPUE_final) +
+             te(year, Month_Number) + te(Month_Number, Catch) + te(Month_Number, CPUE_final) 
+           + te(year, Effort) 
+           + te(Catch, CPUE_final),
+           family=Gamma(link="log"), method = "GCV.Cp",
+           data = ALL_Mo_TC_Dec, select=TRUE)
+
+
+#no month or effort
+I12 <- gam(Income ~  s(year, k=9, bs="cr") +Catch + 
+             s(CPUE_final) +
+             te(year, Month_Number) + te(Month_Number, Catch) + te(Month_Number, CPUE_final) 
+           + te(year, Effort) 
+           + te(Catch, CPUE_final),
+           family=Gamma(link="log"), method = "GCV.Cp",
+           data = ALL_Mo_TC_Dec, select=TRUE)
+
+AIC(I13)
+logLik.gam(I13)
+
+#removing catchxcpue
+I13 <- gam(Income ~  s(year, k=9, bs="cr") +Catch + 
+             s(CPUE_final) + s(Effort ) +
+             te(year, Month_Number) + te(Month_Number, Catch) + te(Month_Number, CPUE_final) 
+           + te(year, Effort), 
+           family=Gamma(link="log"), method = "GCV.Cp",
+           data = ALL_Mo_TC_Dec, select=TRUE)
+
+#linear catch and cpue
+I14 <- gam(Income ~  s(Month_Number, bs="cc") + Catch + CPUE_final +
+                             te(year, Month_Number) + te(year, Effort) + te(Catch, Month_Number)
+                           + te(Catch, CPUE_final) + te(CPUE_final, Month_Number),
+                           family=Gamma(link="log"), method = "GCV.Cp",
+                           data = ALL_Mo_TC_Dec, select=TRUE)
+AIC(I15)
+logLik.gam(I15)
+#no cpue individually
+I15 <- gam(Income ~  s(Month_Number, bs="cc") + Catch+
+             te(year, Month_Number) + te(year, Effort) + te(Catch, Month_Number)
+           + te(Catch, CPUE_final) + te(CPUE_final, Month_Number),
+           family=Gamma(link="log"), method = "GCV.Cp",
+           data = ALL_Mo_TC_Dec, select=TRUE)
+
+#no catch x mo bc not sig in I15
+I16 <- gam(Income ~  s(Month_Number, bs="cc") + 
+             te(year, Month_Number) + te(year, Effort) +
+             + te(Catch, CPUE_final) + te(CPUE_final, Month_Number),
+           family=Gamma(link="log"), method = "GCV.Cp",
+           data = ALL_Mo_TC_Dec, select=TRUE)
+AIC(I17)
+logLik.gam(I17)
+#adding in year 
+I17 <- gam(Income ~  s(Month_Number, bs="cc") + s(year, k=9, bs="cr") +Catch + s(CPUE_final) +
+                             te(year, Month_Number) + te(year, Effort) + te(Catch, Month_Number)
+                           + te(Catch, CPUE_final) + te(CPUE_final, Month_Number),
+                           family=Gamma(link="log"), method = "GCV.Cp",
+                           data = ALL_Mo_TC_Dec, select=TRUE)
+
+#THIS IS THE FINAL MODEL 
+I18 <- gam(Income ~  s(Month_Number, bs="cc") + Catch + s(CPUE_final) +
+                             te(year, Month_Number) + te(year, Effort) + te(Catch, Month_Number)
+                           + te(Catch, CPUE_final) + te(CPUE_final, Month_Number),
+                           family=Gamma(link="log"), method = "GCV.Cp",
+                           data = ALL_Mo_TC_Dec, select=TRUE)
+summary(add_mod_GCVbs_ITred)
+concurvity(add_mod_GCVbs_ITred, full=FALSE)
+gam.check(add_mod_GCVbs_ITred)
+#not the lowest AIC but has the best AIC with least parameterization and not 
+#affecting fit related to Rsq or GCV or gam.check 
+
+####CPUE GAM####
+CP1 <- gam(CPUE_final ~  s(Month_Number), family=Gamma(link="log"),
+           data = ALL_Mo_TC_Dec) 
+CP2 <- gam(CPUE_final ~  s(year, k=9), family=Gamma(link="log"),
+           data = ALL_Mo_TC_Dec)
+CP3<- gam(CPUE_final ~  s(Effort), family=Gamma(link="log"), 
+            data = ALL_Mo_TC_Dec)
+CP4 <- gam(CPUE_final ~  s(Income), family=Gamma(link="log"),
+               data = ALL_Mo_TC_Dec)
+CP5 <- gam(CPUE_final ~  s(Catch), family=Gamma(link="log"), 
+             data = ALL_Mo_TC_Dec)
+#global additive model
+CP6 <- gam(CPUE_final ~  s(Month_Number) + s(year, k=9) + s(Effort)
+                 + s(Income) + s(Catch), family=Gamma(link="log"), method="REML",
+                 data = ALL_Mo_TC_Dec, select=TRUE)
+CP7 <-  gam(Catch ~  s(Month_Number) + s(year, k=9) + s(Effort)
+                    + s(Income), family=Gamma(link="log"), method="REML",
+                    data = ALL_Mo_TC_Dec, select=TRUE)
+
+#gam check flagged fit issues so trying to fix those
+CP6_1 <-  gam(CPUE_final ~  s(Month_Number) + s(year, k=9, bs="cc") + s(Effort, bs="cr")
+                          + s(Income) + s(Catch), family=Gamma(link="log"), method="REML",
+                          data = ALL_Mo_TC_Dec, select=TRUE)
+#reducing terms
+CP8 <- gam(CPUE_final ~ s(year, k=9, bs="cc")+ s(Effort, bs="cr", k=20)
+                      +  s(Catch, k=10), family=Gamma(link="log"), method="REML",
+                      data = ALL_Mo_TC_Dec, select=TRUE)
+
+CP9 <- gam(CPUE_final ~  s(Effort, bs="cr", k=20)  
+                + te(Catch, Income), family=Gamma(link="log"), method="REML",
+                     data = ALL_Mo_TC_Dec, select=TRUE)
+CP10 <- gam(CPUE_final ~ s(Effort, bs="cr", k=20)
+                      +  s(Income), family=Gamma(link="log"), method="REML",
+                      data = ALL_Mo_TC_Dec, select=TRUE)
+
+CP11 <- gam(CPUE_final ~  s(Effort, bs="cr", k=20)
+                      +  s(Catch, k=10), family=Gamma(link="log"), method="REML",
+                      data = ALL_Mo_TC_Dec, select=TRUE)
+
+#final model
+CP12 <- gam(CPUE_final ~  s(Effort, bs="cr", k=20)  
+                     + s(Catch, k=20) + te(Catch, Income), family=Gamma(link="log"), method="REML",
+                     data = ALL_Mo_TC_Dec, select=TRUE)
+#catch as a linear time (shrunk to 1)
+CP12 <- gam(CPUE_final ~  s(Effort, bs="cr", k=20)  
+            + Catch + te(Catch, Income), family=Gamma(link="log"), method="REML",
+            data = ALL_Mo_TC_Dec, select=TRUE)
+#stat tests for final model
+concurvity(CP12)
+gam.check(CP12)
+AIC(CP11)
+logLik.gam(CP11)
+summary(CP12)
+
+
+#####GAM graphs####
+
+CPUE_Eff <- ggplot(ALL_Mo_TC_Dec, aes(x = Effort, y = CPUE_final)) + 
+  geom_point(size = 1.5, alpha=0.9) +  
+  geom_smooth(method = "gam", formula = y ~s(x),  
+              method.args = list(family = Gamma(link = "log")), color ="steelblue", fill = "gray", alpha =0.9) +   # One smooth line
+  geom_point(
+    data = subset(ALL_Mo_TC, Year == 2022),
+    shape = 8,
+    size = 3,
+    show.legend = FALSE
+  )+
+  geom_point(
+    data = subset(ALL_Mo_TC_Dec, Year == 2023),
+    shape = 2,
+    size = 3,
+    show.legend = FALSE
+  )+
+ labs(x = "Monthly Fishing Effort (trips)", y = "Monthly Catch per Unit Effort") +
+  theme_classic(base_size = 12) 
+
+Catch_CPUE <- ggplot(ALL_Mo_TC_Dec, aes(x = CPUE_final, y = Catch)) + 
+  geom_point(size = 1.5, alpha = 0.7) +  
+  # GAM with all data
+  geom_smooth(
+    method = "gam", formula = y ~ s(x),  
+    method.args = list(family = Gamma(link = "log")),
+    color = "steelblue", fill = "gray", alpha = 0.9
+  ) +
+geom_point(
+  data = subset(ALL_Mo_TC_Dec, Year == 2022),
+  shape = 8,
+  size = 3,
+  show.legend = FALSE
+) +
+  geom_point(
+    data = subset(ALL_Mo_TC_Dec, Year == 2023),
+    shape = 2,
+    size = 3,
+    show.legend = FALSE
+  ) +
+  labs(
+    x = "Monthly Catch per Unit Effort",
+    y = "Monthly Total Catch (fish)"
+  ) +
+  theme_classic(base_size = 12) +
+  # scale_color_manual(values = month_colors, name = "Month") +
+  
+  scale_y_continuous(labels = scales::label_comma())   
+Catch_CPUE
+CPUE_Income <- ggplot(ALL_Mo_TC_Dec, aes(x = CPUE_final, y = Income)) +
+  geom_point(size = 1.5, alpha = 0.7) +
+  geom_smooth(
+    inherit.aes = FALSE,
+    data = ALL_Mo_TC_Dec,
+    aes(x = CPUE_final, y = Income),
+    method = "gam",
+    formula = y ~ s(x, k=9),
+    method.args = list(family = Gamma(link = "log")),
+    color = "steelblue", fill = "gray", alpha = 0.9
+  )+
+  geom_point(
+    data = subset(ALL_Mo_TC_Dec, Year == 2022),
+    shape = 8,
+    size = 3,
+    show.legend = FALSE
+  ) +
+  geom_point(
+    data = subset(ALL_Mo_TC_Dec, Year == 2023),
+    shape = 2,
+    size = 3,
+    show.legend = FALSE
+  )+
+  labs(x = "Monthly Catch per Unit Effort", y = "Monthly Total Income (million IDR)") +
+  theme_classic(base_size = 12) + scale_y_continuous(labels = scales::label_number(scale = .000001, suffix = "m"))
+
+CPUE_Income
