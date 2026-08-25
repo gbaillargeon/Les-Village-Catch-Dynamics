@@ -1,0 +1,116 @@
+#make new dataframe for plotting average weighted fisher income by year
+df_indivYEAR<- df_fisherSum %>%
+  group_by(Year) %>%
+  summarise(
+    weighted_avg_income = weighted.mean(Total_Income, Days_Fished, na.rm = TRUE),
+    weighted_sd_income = sqrt(
+      sum(Days_Fished * (Total_Income - weighted.mean(Total_Income, Days_Fished, na.rm = TRUE))^2, na.rm = TRUE) /
+        sum(Days_Fished, na.rm = TRUE)
+    ),
+    weighted_avg_catch = weighted.mean(Total_Catch, Days_Fished, na.rm = TRUE),
+    weighted_sd_catch = sqrt(
+      sum(Days_Fished * (Total_Catch - weighted.mean(Total_Catch, Days_Fished, na.rm = TRUE))^2, na.rm = TRUE) /
+        sum(Days_Fished, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  )
+df_indivYEAR$Year <- as.numeric(as.character(df_indivYEAR$Year))
+
+ggplot(df_indivYEAR, aes(x = Year, y = weighted_avg_income)) +
+  geom_line(size=1, color="gray")+
+  geom_point(size=1.5)+
+  annotate(
+    "rect",
+    ymin = 546400, ymax = 1512000,
+    xmin = -Inf, xmax = Inf,
+    fill = "lightblue", alpha = 0.6) + 
+  geom_hline(yintercept = 765000, linetype = "dashed", color = "red", size = 1, alpha =0.6) +
+  geom_hline(yintercept = 546400, linetype = "dashed", color = "red", size = 1, alpha =0.6) +
+  geom_hline(yintercept = 1512000, linetype = "dashed", color = "red", size = 1, alpha =0.6) +
+  ## Confidence band from your SDs
+  geom_errorbar(aes(
+    ymin = weighted_avg_income - weighted_sd_income,
+    ymax = weighted_avg_income + weighted_sd_income
+  ),
+  width = 0.2, color = "grey"
+  ) +
+  labs(
+    title = "Average Monthly Fisher Income by Year",
+    x = "Year",
+    y = "Weighted Average Monthly Fisher Income"
+  ) +
+  coord_cartesian(ylim = c(0, NA)) +  #  zooms but keeps all data
+  #scale_y_continuous(labels = label_number(big.mark = ","))+
+  scale_x_continuous(
+    breaks = seq(
+      from = min(df_indivYEAR$Year, na.rm = TRUE),
+      to   = max(df_indivYEAR$Year, na.rm = TRUE),
+      by   = 2
+    )
+  )+
+  theme_classic()
+
+#Fish price over time analysis
+#consistently top 5 fished species
+Top5 <- YearlYMaster_Species %>%
+  group_by(Year) %>%
+  slice_max(order_by = Total_Catch_Yr, n = 5) %>%
+  ungroup()
+Top5
+
+#find species that are most often in top 5 over the years
+Top5_consistency <- Top5 %>%
+  count(Species, name = "n_years_in_top5") %>%
+  arrange(desc(n_years_in_top5))
+Top5_consistency
+
+top5sp <- c("Pseudocheilinus hexataenia", "Pseudanthias dispar", "Chromis viridis",
+            "Halichoeres chrysus", "Chrysiptera talboti", "Dascyllus trimaculatus", "Pomacanthus Imperator" )
+
+#create clean dataframe for plotting
+Top5_price_distr_clean <- Top5_price_distr %>%
+  filter(!is.na(Price), !is.na(Species), !is.na(Year)) %>%      # remove NAs
+  mutate(
+    Price = as.numeric(Price),                                   # ensure numeric
+    Species = factor(Species),                                   # factor for y-axis
+    Year = factor(Year, levels = sort(unique(Year)),             # show actual years
+                  labels = sort(unique(Year)))
+  ) %>%
+  # reorder species by overall mean price for better vertical spacing
+  group_by(Species) %>%
+  mutate(mean_price = mean(Price, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(Species = fct_reorder(Species, mean_price))
+
+# 2️⃣ Plot
+ggplot(Top5_price_distr_clean, 
+       aes(x = Price, y = Species, fill = Year, group = interaction(Species, Year))) +
+  geom_density_ridges(scale = 1, rel_min_height = 0.001, alpha = 0.5) +  # vertical spacing adjusted
+  scale_fill_viridis(discrete = TRUE, option = "D", name = "Year") +
+  coord_cartesian(xlim = c(0, 5000)) +                     # x-axis limit
+  scale_y_discrete(expand = expansion(mult = c(0.002, 0.005))) + # add padding between ridges
+  labs(title = "Price Distributions of Top 5 Species Over Years",
+       x = "Price",
+       y = "Species") +
+  theme_ipsum() +
+  theme(
+    legend.position = "right",
+    strip.text.x = element_text(size = 8)
+  )
+
+#calculate turnover 
+#using price instead of abundance 
+#shows change in price over time, not abundance
+avg_price_yrs$Year <- as.numeric(avg_price_yrs$Year)
+avg_price_yrs$Price_mean <- as.numeric(avg_price_yrs$Price_mean)
+
+turnover<-as.data.frame(turnover(
+  df=avg_price_yrs,
+  time.var="Year", 
+  species.var = "Species", 
+  abundance.var = "Price_mean", 
+  replicate.var = NA,
+  metric = "total")) 
+
+#see results of turnover
+turnover
