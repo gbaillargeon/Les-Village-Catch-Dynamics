@@ -1,0 +1,100 @@
+#Select Core Species
+#Uses NMDS Results
+Top20 <- YearlYMaster_Species %>%  filter(!is.na(Species), Species != "#N/A") %>%
+  group_by(Year) %>%
+  slice_max(order_by = Total_Catch_Yr, n = 20) %>%
+  ungroup()
+Top20
+
+Top20I <- YearlYMaster_Species %>%  filter(!is.na(Species), Species != "#N/A") %>%
+  group_by(Year) %>%
+  slice_max(order_by = Total_Income_Yr, n = 20) %>%
+  ungroup()
+Top20I
+
+#find species that are most often in top 20 over the years
+Top20_consistency <- Top20 %>%
+  count(Species, name = "years_top20") %>%
+  arrange(desc(years_top20)) %>% slice_head(n=20)
+Top20_consistency
+
+Top20_consistencyI <- Top20I %>%
+  count(Species, name = "years_top20") %>%
+  arrange(desc(years_top20))%>% slice_head(n=20)
+Top20_consistencyI
+
+# Species                    years_top20
+# <chr>                            <int>
+#   1 Chromis margaritifer                 9
+# 2 Chrysiptera talboti                  9
+# 3 Halichoeres chrysus                  9
+# 4 Labroides dimidiatus                 9
+# 5 Pseudanthias dispar                  9
+# 6 Pseudocheilinus hexataenia           9
+# 7 Valenciennea puellaris               9
+# 8 Chromis viridis                      8
+# 9 Dascyllus trimaculatus               8
+# 10 Macropharyngodon meleagris           8
+
+
+# Species                    years_top20
+# <chr>                            <int>
+#   1 Halichoeres chrysus                  9
+# 2 Labroides dimidiatus                 9
+# 3 Pseudanthias dispar                  9
+# 4 Pseudocheilinus hexataenia           9
+# 5 Valenciennea puellaris               9
+# 6 Chromis viridis                      8
+# 7 Chrysiptera talboti                  8
+# 8 Acanthurus lineatus                  7
+# 9 Centropyge bicolor                   7
+# 10 Lysmata amboinensis                  7
+
+#count how often species were caught each year
+species_year_summary <- YearlYMaster_Species %>%
+  filter(!is.na(Species), Species != "#N/A") %>% 
+  mutate(Species = str_trim(Species)) %>%
+  mutate(Year = as.numeric(Year)) %>%
+  group_by(Species) %>%
+  summarise(
+    total_sp = n_distinct(YearlYMaster_Species$Species),
+    years_caught = n_distinct(Year[Total_Catch_Yr > 0]),
+    total_years = 9,
+    years_not_caught = total_years - years_caught,
+    perc_years_not_caught = (years_not_caught / total_years) * 100,
+    .groups = "drop"
+  )
+
+species_year_summary
+
+#now find species that are not caught >80% of the time 
+species_absent_80 <- species_year_summary %>%
+  filter(perc_years_not_caught >= 80) %>%
+  arrange(desc(perc_years_not_caught))
+
+#now find species that are caught in  100% of years
+species_present_90 <- species_year_summary %>%
+  filter(perc_years_not_caught == 0) %>%
+  arrange(desc(perc_years_not_caught))
+
+#now extract catch, income data for species present in all years 
+species_names_90 <- species_present_90 %>%
+  pull(Species)
+
+Top_Speices_Data <- YearlYMaster_Species %>%
+  filter(Species %in% species_names_90)
+
+#check overlap between the top 20 and species caught 100% of time
+top20_names <- Top20_consistency$Species
+top_sp_names <- Top_Speices_Data$Species
+top20_namesI <- Top20_consistencyI$Species
+
+in_both_sp <- intersect(top20_names, top_sp_names)
+in_both_spI <- intersect(top20_names, top20_namesI) #overlap in sp in top 20 anually for catch and income 
+in_both_spCI <- intersect(top20_namesI, top_sp_names)
+final_overlap <- intersect(in_both_sp, in_both_spI)
+#what is always caught and consistently (20) caught AND what is caught(20) and making income consitently 
+#this makes up the 'core species' group unique to the fishery 
+# [1] "Chromis margaritifer"       "Chrysiptera talboti"        "Halichoeres chrysus"        "Labroides dimidiatus"      
+# [5] "Pseudanthias dispar"        "Pseudocheilinus hexataenia" "Valenciennea puellaris"     "Chromis viridis"           
+# [9] "Dascyllus trimaculatus"     "Macropharyngodon meleagris" "Acanthurus lineatus"        "Coris gaimard" 
